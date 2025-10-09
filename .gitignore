@@ -1,0 +1,15 @@
+# Python cache and virtual environments
+__pycache__/
+*.pyc
+*.pyo
+venv/
+env/
+
+# Large data and model files
+*.h5
+*.pkl
+*.zip
+
+# System files
+.DS_Store
+
