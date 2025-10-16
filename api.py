@@ -6,16 +6,16 @@ from PIL import Image
 import numpy as np
 import io
 import os
-import requests  # <--- добавили
+import gdown  # ✅ вместо requests, безопаснее и стабильнее для Google Drive
 
 app = FastAPI()
 
-# Разрешаем обращения с фронта (React + Render)
+# --- Разрешаем запросы с фронта ---
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
-        "https://skinai-frontend.onrender.com",  # укажи фронт-URL, если он есть
+        "https://skinai-frontend.onrender.com",
         "https://skinai-backend-kc1a.onrender.com"
     ],
     allow_credentials=True,
@@ -23,51 +23,49 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- Автоматическая загрузка модели с Google Drive ---
+# --- Путь и загрузка модели ---
 MODEL_PATH = "skin_disease_model.h5"
-MODEL_URL = "https://drive.google.com/uc?export=download&id=1T6nB5lyG4oUrjNM7Nm6CHfRZzKknh3U7"
+DRIVE_ID = "1T6nB5lyG4oUrjNM7Nm6CHfRZzKknh3U7"
+MODEL_URL = f"https://drive.google.com/uc?id={DRIVE_ID}"
 
 if not os.path.exists(MODEL_PATH):
-    print("Model not found locally. Downloading from Google Drive...")
-    response = requests.get(MODEL_URL)
-    with open(MODEL_PATH, "wb") as f:
-        f.write(response.content)
-    print("Model downloaded successfully!")
-# -----------------------------------------------------
+    print("🔽 Model not found locally. Downloading from Google Drive...")
+    gdown.download(MODEL_URL, MODEL_PATH, quiet=False)
+    print("✅ Model downloaded successfully!")
 
+# --- Загружаем модель ---
 model = load_model(MODEL_PATH)
-print("Model loaded. output shape:", getattr(model, "output_shape", None))
-LABELS = [
-  {"name": "Actinic Keratoses (akiec)", "description": "Precancerous lesion caused by sun damage.", "severity":"moderate", "treatment":"Topical therapy, cryotherapy, or removal."},
-  {"name": "Basal Cell Carcinoma (bcc)", "description": "Most common skin cancer, pearly bumps or sores.", "severity":"serious", "treatment":"Surgery, radiation, topical therapy."},
-  {"name": "Benign Keratosis-like lesions (bkl)", "description": "Non-cancerous lesion, often looks waxy or stuck-on.", "severity":"mild", "treatment":"No treatment needed unless cosmetic."},
-  {"name": "Dermatofibroma (df)", "description": "Benign firm bump, reddish-brown.", "severity":"mild", "treatment":"Only removal if symptomatic."},
-  {"name": "Melanoma (mel)", "description": "Dangerous skin cancer, irregular dark mole/spot.", "severity":"critical", "treatment":"Urgent surgery and oncology care."},
-  {"name": "Melanocytic Nevi (nv)", "description": "Common mole, usually benign.", "severity":"mild", "treatment":"Observation; removal if atypical."},
-  {"name": "Vascular Lesions (vasc)", "description": "Benign vascular growth, may look red or purple.", "severity":"mild", "treatment":"Laser or removal if cosmetic."}
-]
-# ----------------------------------------------------
+print("✅ Model loaded. Output shape:", getattr(model, "output_shape", None))
 
-def preprocess_image(image_bytes, target_size=(128, 128)):  # <--- здесь ставим 128x128
+# --- Метки классов ---
+LABELS = [
+    {"name": "Actinic Keratoses (akiec)", "description": "Precancerous lesion caused by sun damage.", "severity":"moderate", "treatment":"Topical therapy, cryotherapy, or removal."},
+    {"name": "Basal Cell Carcinoma (bcc)", "description": "Most common skin cancer, pearly bumps or sores.", "severity":"serious", "treatment":"Surgery, radiation, topical therapy."},
+    {"name": "Benign Keratosis-like lesions (bkl)", "description": "Non-cancerous lesion, often looks waxy or stuck-on.", "severity":"mild", "treatment":"No treatment needed unless cosmetic."},
+    {"name": "Dermatofibroma (df)", "description": "Benign firm bump, reddish-brown.", "severity":"mild", "treatment":"Only removal if symptomatic."},
+    {"name": "Melanoma (mel)", "description": "Dangerous skin cancer, irregular dark mole/spot.", "severity":"critical", "treatment":"Urgent surgery and oncology care."},
+    {"name": "Melanocytic Nevi (nv)", "description": "Common mole, usually benign.", "severity":"mild", "treatment":"Observation; removal if atypical."},
+    {"name": "Vascular Lesions (vasc)", "description": "Benign vascular growth, may look red or purple.", "severity":"mild", "treatment":"Laser or removal if cosmetic."}
+]
+
+# --- Предобработка изображения ---
+def preprocess_image(image_bytes, target_size=(128, 128)):
     img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
     img = img.resize(target_size)
     arr = np.array(img).astype(np.float32) / 255.0
     arr = np.expand_dims(arr, 0)
     return arr
 
+# --- Эндпоинт для предсказания ---
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
-    # читаем файл
     contents = await file.read()
-    x = preprocess_image(contents, target_size=(128,128))  # поменяй размер если модель другая
+    x = preprocess_image(contents)
 
-    # предсказание
-    preds = model.predict(x)[0]  # предполагаем, что модель возвращает вектор вероятностей
-    # защитимся, если preds — скаляр
+    preds = model.predict(x)[0]
     if np.ndim(preds) == 0:
         preds = np.array([preds])
 
-    # топ-3
     top_idx = np.argsort(preds)[::-1][:3]
     alternatives = []
     for idx in top_idx:
@@ -82,17 +80,18 @@ async def predict(file: UploadFile = File(...)):
             "treatment": meta["treatment"]
         })
 
-    primary = alternatives[0] if alternatives else {"name":"unknown","confidence":0}
+    primary = alternatives[0] if alternatives else {"name": "unknown", "confidence": 0}
 
     return {
         "prediction": primary["name"],
         "confidence": primary["confidence"],
-        "description": primary.get("description",""),
-        "severity": primary.get("severity","unknown"),
-        "treatment": primary.get("treatment",""),
+        "description": primary.get("description", ""),
+        "severity": primary.get("severity", "unknown"),
+        "treatment": primary.get("treatment", ""),
         "alternatives": alternatives[1:]
     }
+
+# --- Проверка сервера ---
 @app.get("/")
 def root():
-    return {"message": "Backend работает!"}
-
+    return {"message": "✅ Backend работает! Модель успешно загружена."}

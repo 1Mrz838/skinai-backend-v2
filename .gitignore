@@ -1,15 +1,9 @@
-# Python cache and virtual environments
+venv/
 __pycache__/
 *.pyc
 *.pyo
-venv/
-env/
-
-# Large data and model files
+*.pyd
 *.h5
-*.pkl
 *.zip
-
-# System files
 .DS_Store
-
+.env
