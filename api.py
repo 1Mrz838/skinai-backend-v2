@@ -1,13 +1,27 @@
 # api.py
 from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from tensorflow.keras.models import load_model
 from PIL import Image
 import numpy as np
 import io
 import os
-import gdown  # ✅ вместо requests, безопаснее и стабильнее для Google Drive
+import gdown
 
+# --- TensorFlow совместимость ---
+import tensorflow as tf
+from tensorflow.keras.layers import InputLayer
+
+# 🧩 фикс совместимости старой модели с TensorFlow 2.15
+class CompatibleInputLayer(InputLayer):
+    def __init__(self, *args, **kwargs):
+        kwargs.pop('batch_shape', None)
+        super().__init__(*args, **kwargs)
+
+tf.keras.layers.InputLayer = CompatibleInputLayer
+
+from tensorflow.keras.models import load_model
+
+# --- Создаем FastAPI ---
 app = FastAPI()
 
 # --- Разрешаем запросы с фронта ---
@@ -34,18 +48,21 @@ if not os.path.exists(MODEL_PATH):
     print("✅ Model downloaded successfully!")
 
 # --- Загружаем модель ---
-model = load_model(MODEL_PATH)
-print("✅ Model loaded. Output shape:", getattr(model, "output_shape", None))
+try:
+    model = load_model(MODEL_PATH, compile=False)
+    print("✅ Model loaded successfully. Output shape:", getattr(model, "output_shape", None))
+except Exception as e:
+    print("❌ Error loading model:", str(e))
 
 # --- Метки классов ---
 LABELS = [
-    {"name": "Actinic Keratoses (akiec)", "description": "Precancerous lesion caused by sun damage.", "severity":"moderate", "treatment":"Topical therapy, cryotherapy, or removal."},
-    {"name": "Basal Cell Carcinoma (bcc)", "description": "Most common skin cancer, pearly bumps or sores.", "severity":"serious", "treatment":"Surgery, radiation, topical therapy."},
-    {"name": "Benign Keratosis-like lesions (bkl)", "description": "Non-cancerous lesion, often looks waxy or stuck-on.", "severity":"mild", "treatment":"No treatment needed unless cosmetic."},
-    {"name": "Dermatofibroma (df)", "description": "Benign firm bump, reddish-brown.", "severity":"mild", "treatment":"Only removal if symptomatic."},
-    {"name": "Melanoma (mel)", "description": "Dangerous skin cancer, irregular dark mole/spot.", "severity":"critical", "treatment":"Urgent surgery and oncology care."},
-    {"name": "Melanocytic Nevi (nv)", "description": "Common mole, usually benign.", "severity":"mild", "treatment":"Observation; removal if atypical."},
-    {"name": "Vascular Lesions (vasc)", "description": "Benign vascular growth, may look red or purple.", "severity":"mild", "treatment":"Laser or removal if cosmetic."}
+    {"name": "Actinic Keratoses (akiec)", "description": "Precancerous lesion caused by sun damage.", "severity": "moderate", "treatment": "Topical therapy, cryotherapy, or removal."},
+    {"name": "Basal Cell Carcinoma (bcc)", "description": "Most common skin cancer, pearly bumps or sores.", "severity": "serious", "treatment": "Surgery, radiation, topical therapy."},
+    {"name": "Benign Keratosis-like lesions (bkl)", "description": "Non-cancerous lesion, often looks waxy or stuck-on.", "severity": "mild", "treatment": "No treatment needed unless cosmetic."},
+    {"name": "Dermatofibroma (df)", "description": "Benign firm bump, reddish-brown.", "severity": "mild", "treatment": "Only removal if symptomatic."},
+    {"name": "Melanoma (mel)", "description": "Dangerous skin cancer, irregular dark mole/spot.", "severity": "critical", "treatment": "Urgent surgery and oncology care."},
+    {"name": "Melanocytic Nevi (nv)", "description": "Common mole, usually benign.", "severity": "mild", "treatment": "Observation; removal if atypical."},
+    {"name": "Vascular Lesions (vasc)", "description": "Benign vascular growth, may look red or purple.", "severity": "mild", "treatment": "Laser or removal if cosmetic."}
 ]
 
 # --- Предобработка изображения ---
@@ -70,7 +87,7 @@ async def predict(file: UploadFile = File(...)):
     alternatives = []
     for idx in top_idx:
         prob = float(preds[idx]) if idx < len(preds) else 0.0
-        meta = LABELS[idx] if idx < len(LABELS) else {"name": f"class_{idx}", "description":"", "severity":"unknown", "treatment":""}
+        meta = LABELS[idx] if idx < len(LABELS) else {"name": f"class_{idx}", "description": "", "severity": "unknown", "treatment": ""}
         alternatives.append({
             "index": int(idx),
             "name": meta["name"],
