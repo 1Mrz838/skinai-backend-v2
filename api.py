@@ -29,8 +29,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
-        "https://skinai-frontend.onrender.com",
-        "https://skinai-backend-kc1a.onrender.com"
+        "https://skinai-frontend-v2.vercel.app",  # 👈 твой реальный фронт
     ],
     allow_credentials=True,
     allow_methods=["*"],
